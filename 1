@@ -1,0 +1,68 @@
+import re
+from collections import defaultdict
+
+# Listes simplifiées pour cette démonstration (à enrichir en pratique selon le point 1)
+keywords = {
+    "global": ["géologie", "géophysique", "monitoring", "capteurs", "données", "sous-sol", "exploration", "mesure", "imagerie", "prospection", "infrastructure", "risque", "analyse", "mesurage", "informations"],
+    "mining_specific": ["minier", "extraction", "gisement", "forage", "carottage", "minerai", "terrils", "puits", "galerie", "prospection", "drilling", "mine", "mineral", "ventilation", "sécurité minière"],
+    "acronyms": ["GIS", "LIDAR", "UAV", "EM", "GPR", "IP", "MT", "ERT", "SAR", "GNSS", "Seis", "3D", "GPS", "VSP", "TDEM"],
+    "job_titles": ["directeur", "ingénieur", "consultant", "analyste", "chef", "technicien", "responsable", "manager", "expert", "géologue", "superviseur", "chef", "coordinateur", "opérateur", "prospecteur"],
+    "companies": ["glencore", "riotinto", "bhp", "anglo", "vale", "newmont", "barrick", "teck", "freeport", "antofagasta", "first quantum", "fortescue", "norilsk", "impala", "mmg"]
+}
+
+# On combine toutes les racines pour plus de flexibilité
+all_keywords = {key: [re.escape(word.lower()) for word in words] for key, words in keywords.items()}
+
+# Génération des expressions régulières flexibles
+def keyword_to_pattern(word):
+    # direct.* -> pour titres
+    # \b\w*\s*word\s*\w*\b -> pour les autres (company, summary, etc.)
+    if word.endswith(".*"):
+        return re.compile(word, re.IGNORECASE)
+    return re.compile(rf"\b\w*\s*{word}\s*\w*\b", re.IGNORECASE)
+
+# Créer des patterns pour toutes les catégories
+patterns = []
+for category, words in all_keywords.items():
+    for word in words:
+        if category in ["job_titles"]:
+            pattern = keyword_to_pattern(f"{word}.*")  # Racine flexible
+        else:
+            pattern = keyword_to_pattern(word)
+        patterns.append((category, pattern))
+
+# Fonction pour compter les correspondances par ligne
+def compute_score(row):
+    scores = defaultdict(int)
+    
+    fields = {
+        "title": row["title"],
+        "companyName": row["companyName"],
+        "summary": row["summary"],
+        "titleDescription": row["titleDescription"],
+        "industry": row["industry"],
+        "pastExperienceCompanyName": row["pastExperienceCompanyName"],
+        "pastExperienceCompanyTitle": row["pastExperienceCompanyTitle"]
+    }
+    
+    for category, pattern in patterns:
+        for field_name, field_value in fields.items():
+            if isinstance(field_value, str):
+                matches = pattern.findall(field_value)
+                scores[category] += len(matches)
+    
+    total_score = sum(scores.values())
+    premium_score = 0.5 if row["isPremium"] else 0
+    return pd.Series({**scores, "premium": premium_score, "total_score": total_score + premium_score})
+
+# Appliquer la fonction à chaque ligne
+scores_df = df.apply(compute_score, axis=1)
+
+# Fusion avec le DataFrame initial
+df_scored = pd.concat([df, scores_df], axis=1)
+
+# Trier par score total décroissant
+df_sorted = df_scored.sort_values(by="total_score", ascending=False)
+
+# Afficher les premières lignes
+df_sorted.head(10)
